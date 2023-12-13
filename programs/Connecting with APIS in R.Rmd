@@ -1,0 +1,177 @@
+---
+title: "Azure from Github"
+author: "Amruta Habbu"
+date: "2023-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+--------------------------------------------------------------------------------------------------
+
+### Topic: Azure
+
+**Description:** Azure is a cloud computing service created by Microsoft for building, testing, deploying, and managing applications and services through a global network of Microsoft-managed data centers.
+
+**Assignment:** In this assignment, I am going to use the *'gh'* library to access the endpoints of GitHub API and perform operations on the data rendered in memory. My topic has **14,772** public repositories. 
+
+[Azure Github Repository](https://github.com/topics/azure)
+
+### Implementation
+
+**Library Declarations: **
+```{r}
+library(gh)
+library(tidyverse)
+library(kableExtra)
+library(dplyr)
+```
+
+**Obtaining 100 repositories for Azure **
+```{r}
+github_token <- "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"
+gh_token(github_token)
+
+repositories <- gh("/search/repositories", q = "topic:azure", per_page = 100, page = 1)
+repo_list  = list()
+repo_list <- append(repo_list, repositories)
+items = repo_list$items
+count_repos = length(items)
+
+```
+**Successfully pulled 100 repositories for Azure **
+```{r}
+count_repos
+```
+
+**Table 1- A table summarizing the repos**
+```{r}
+full_name_vector = map_chr(items, ~.$full_name)
+created_at_vector = map_chr(items,~.$created_at)
+size_vector = map_int(items,~.$size)
+language_vector <- map_chr(items, ~ if (is.null(.x$language)) "NA" else .x$language)
+topic_vector = map_chr(items, ~if (is.null(.x$topics)) "NA" else paste(.x$topics,collapse =","))
+summary_repo_table = data.frame(full_name = full_name_vector,
+                         created_at = created_at_vector,
+                         size = size_vector,
+                         language = language_vector,
+                         topics = topic_vector)
+summary_repo_table = summary_repo_table[order(summary_repo_table$size, decreasing = FALSE), ] 
+
+kable(head(summary_repo_table,n=10), "html") %>%
+  kable_paper(bootstrap_options = "striped", full_width = F)%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) 
+
+```
+**Table 2- A table summarizing the owners of these repos**
+
+```{r}
+login_vector = map_chr(items, ~.$owner$login)
+public_repos_vector = map_int(login_vector,function(x){
+  one_profile = gh("/users/{name}",name=x)
+  return(one_profile$public_repos)
+})
+
+created_at_vector=map_chr(login_vector,function(x){
+  one_profile = gh("/users/{name}",name=x)
+  return(one_profile$created_at)
+})
+
+followers_vector=map_int(login_vector,function(x){
+  one_profile = gh("/users/{name}",name=x)
+  return(one_profile$followers)
+})
+owner_table = data.frame(login = login_vector,
+                          public_repos = public_repos_vector,
+                          created_at = created_at_vector,
+                          followers = followers_vector)
+
+owner_table = owner_table[order(owner_table$public_repos, decreasing = FALSE), ] 
+
+kable(head(owner_table,n=10), "html") %>%
+  kable_paper(bootstrap_options = "striped", full_width = T)%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) 
+```
+**Table 3- A table showing the most recently closed issue**
+```{r}
+issue <- gh("/repos/{owner}/{owner}.github.io/issues?state=closed&sort=updated&direction=desc&page=1&per_page=1", 
+            owner = login_vector[1])
+
+title_of_issue_vector= map_chr(full_name_vector,function(x){
+  issue = gh("/repos/{owner}/issues?state=closed&sort=updated&direction=desc&page=1&per_page=1", 
+                   owner = x)
+  return(issue[[1]]$title)
+})
+
+created_at_issue_vector= map_chr(full_name_vector,function(x){
+  issue = gh("/repos/{owner}/issues?state=closed&sort=updated&direction=desc&page=1&per_page=1", 
+             owner = x)
+  return(issue[[1]]$created_at)
+})
+
+closed_at_issue_vector= map_chr(full_name_vector,function(x){
+  issue = gh("/repos/{owner}/issues?state=closed&sort=updated&direction=desc&page=1&per_page=1", 
+             owner = x)
+  return(issue[[1]]$closed_at)
+})
+
+days_to_close1 = as.Date(closed_at_issue_vector) - as.Date(created_at_issue_vector)
+
+issues_table = data.frame(full_name = full_name_vector,
+                         title = title_of_issue_vector,
+                         created_at = created_at_issue_vector,
+                         closed_at = closed_at_issue_vector,
+                         days_to_close = days_to_close1)
+
+issues_table = issues_table[order(issues_table$closed_at, decreasing = TRUE), ]
+
+kable(head(issues_table,n=10), "html") %>%
+  kable_paper(bootstrap_options = "striped", full_width = T)%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) 
+```
+---------------------------------------------------
+
+### Visualizations
+
+**5 other topics that co-occur with Azure**
+```{r}
+topic = map_df(items,magrittr::extract,c("full_name","topics"))
+
+topic_count = topic |>
+  group_by(topics) |> 
+  summarize(count = n()) |>
+  arrange(desc(count)) 
+
+top5 <- topic_count[2:6, ]
+top5$count <- as.numeric(top5$count)
+top5$topics <- as.character(top5$topics)
+
+ggplot(top5,aes(x=topics,y = count)) + 
+  geom_bar(stat='identity',fill="blue",width = 0.5) + 
+  labs(title = "Topics co-ocurring with Azure", x = "Topics", y = "Count")+
+  theme_minimal() 
+```
+
+**Number of repos created each year**
+```{r}
+date = map_df(
+  items,
+  magrittr::extract,
+  c("full_name","created_at") 
+)
+
+date$created_at = format(as.Date(date$created_at),format ="%Y")
+
+group_date <- date |>
+  group_by(created_at) |>
+  summarize(count = n())
+
+
+ggplot(data = group_date) + 
+  geom_line(mapping = aes(x=created_at, y = count,group=1,colour="red")) + 
+  labs(title = "Repositories created each year", x = "Year", y = "Number of repos")+
+  geom_text(aes(x=created_at,y=count,label = count), hjust = -0.2)+
+  theme_minimal()
+
+```
